@@ -54,7 +54,6 @@ function setupNavigation() {
     });
 }
 
-// LÓGICA ATUALIZADA: Geração dinâmica de Insights baseada nos KPIs
 function updateDashboardData() {
     if (currentUser.accessLevel !== 1) return;
     let total = tasks.length, done = 0, delayed = 0, inProgress = 0;
@@ -75,7 +74,6 @@ function updateDashboardData() {
     document.getElementById('kpi-delayed').textContent = delayed;
     document.getElementById('kpi-done').textContent = done;
 
-    // Gerador de mensagens textuais no painel
     const insightsElement = document.getElementById('dashboard-insights');
     if (insightsElement) {
         if (total === 0) {
@@ -103,6 +101,7 @@ function renderSystemData() {
     renderReportsTable();
     if (currentUser.accessLevel === 1) {
         renderFoldersAdminList();
+        renderPermUserSelect();
     }
 }
 
@@ -128,37 +127,83 @@ function renderReportsTable() {
     });
 }
 
-function exportToCSV() {
+function exportToExcel() {
     if (tasks.length === 0) {
         showToast("Não há tarefas para exportar.", "error");
         return;
     }
 
-    let csvContent = "ID,Titulo,Pasta,Subpasta,Status,Prioridade,Prazo,Descricao\n";
+    const dataToExport = tasks.map(task => {
+        const prazoDate = new Date(task.deadline);
+        const prazoFormatado = prazoDate.toLocaleString('pt-BR');
 
-    tasks.forEach(task => {
-        const id = task.id;
-        const title = `"${task.title.replace(/"/g, '""')}"`;
-        const folder = `"${task.folder}"`;
-        const subfolder = `"${task.subfolder || ''}"`;
-        const status = `"${task.status}"`;
-        const priority = `"${task.priority}"`;
-        const deadline = `"${new Date(task.deadline).toLocaleString('pt-BR')}"`;
-        const desc = `"${task.description.replace(/"/g, '""').replace(/\n/g, ' ')}"`;
+        let dataConclusao = "Pendente";
+        let horaConclusao = "-";
+        let responsavel = "-";
+        let statusPrazo = "-";
 
-        csvContent += `${id},${title},${folder},${subfolder},${status},${priority},${deadline},${desc}\n`;
+        if (task.status === 'Concluído') {
+            if (task.completed_at) {
+                const concluidoEm = new Date(task.completed_at);
+                dataConclusao = concluidoEm.toLocaleDateString('pt-BR');
+                horaConclusao = concluidoEm.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                responsavel = task.completed_by || "Não registrado";
+
+                if (concluidoEm <= prazoDate) {
+                    statusPrazo = "Concluída dentro do prazo";
+                } else {
+                    statusPrazo = "Concluída com atraso";
+                }
+            } else {
+                dataConclusao = "Dado histórico";
+                responsavel = "Sistema legado";
+                statusPrazo = "Indefinido";
+            }
+        }
+
+        let chatCompleto = "Sem observações";
+        if (Array.isArray(task.observations) && task.observations.length > 0) {
+            chatCompleto = task.observations.map(obs => {
+                return `[${obs.date}] ${obs.author}: ${obs.text}`;
+            }).join('\n\n');
+        }
+
+        const assignedNames = task.assignees.map(id => {
+            const u = lmsTeam.find(user => user.id === id);
+            return u ? u.name : 'Desconhecido';
+        }).join(', ');
+
+        return {
+            "ID Tarefa": task.id,
+            "Título": task.title,
+            "Pasta Principal": task.folder,
+            "Subpasta": task.subfolder || "-",
+            "Status Atual": task.status,
+            "Prioridade": task.priority,
+            "Atribuída para": assignedNames,
+            "Prazo Estipulado": prazoFormatado,
+            "Data de Conclusão": dataConclusao,
+            "Hora de Conclusão": horaConclusao,
+            "Responsável pela Conclusão": responsavel,
+            "Situação do Prazo": statusPrazo,
+            "Conversa do Chat": chatCompleto,
+            "Descrição da Tarefa": task.description
+        };
     });
 
-    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `relatorio_lms_${new Date().getTime()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    showToast("Relatório exportado com sucesso!", "success");
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Relatório_Tarefas_LMS");
+
+    const wscols = [
+        {wch: 10}, {wch: 40}, {wch: 20}, {wch: 20}, {wch: 15}, {wch: 15},
+        {wch: 35}, {wch: 20}, {wch: 20}, {wch: 20}, {wch: 30}, {wch: 25},
+        {wch: 100}, {wch: 60} 
+    ];
+    worksheet['!cols'] = wscols;
+
+    XLSX.writeFile(workbook, `relatorio_operacao_lms_${new Date().getTime()}.xlsx`);
+    showToast("Relatório baixado em Excel (.xlsx) com sucesso!", "success");
 }
 
 function renderFoldersAdminList() {
@@ -287,10 +332,46 @@ function renderTeamTable() {
             <td><strong>${user.name}</strong></td>
             <td>${user.role}</td>
             <td>${accessBadge}</td>
-            <td><button onclick="removeUser(${user.id})" class="btn-danger">Remover</button></td>
+            <td>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="editUser(${user.id})" class="btn-sm" style="background-color: var(--cor-azul-forte); color: white; padding: 6px 12px;">Editar</button>
+                    <button onclick="removeUser(${user.id})" class="btn-sm btn-danger" style="padding: 6px 12px;">Remover</button>
+                </div>
+            </td>
         `;
         tbody.appendChild(row);
     });
+}
+
+window.editingUserId = null;
+
+window.editUser = function(userId) {
+    const user = lmsTeam.find(u => u.id === userId);
+    if (!user) return;
+
+    editingUserId = userId;
+    
+    document.getElementById('form-user-title').textContent = 'Editar Colaborador';
+    document.getElementById('new-user-name').value = user.name;
+    document.getElementById('new-user-email').value = user.email;
+    document.getElementById('new-user-email').disabled = true; 
+    document.getElementById('new-user-role-text').value = user.role;
+    document.getElementById('new-user-level').value = user.accessLevel;
+
+    document.getElementById('btn-submit-user').textContent = '💾 Salvar Alterações';
+    document.getElementById('btn-cancel-user-edit').classList.remove('hidden');
+
+    document.querySelector('.main-content').scrollTo({ top: 0, behavior: 'smooth' });
+    showToast("Modo de edição ativado.", "success");
+}
+
+window.cancelUserEdit = function() {
+    editingUserId = null;
+    document.getElementById('add-user-form').reset();
+    document.getElementById('form-user-title').textContent = 'Adicionar Novo Colaborador';
+    document.getElementById('new-user-email').disabled = false;
+    document.getElementById('btn-submit-user').textContent = 'Cadastrar na Equipe';
+    document.getElementById('btn-cancel-user-edit').classList.add('hidden');
 }
 
 window.removeUser = async function(userId) {
@@ -329,39 +410,185 @@ function setupAddUserForm() {
         e.preventDefault();
         const name = document.getElementById('new-user-name').value.trim();
         const email = document.getElementById('new-user-email').value.trim().toLowerCase();
-        const roleSelect = document.getElementById('new-user-role').value; 
-        const dadosSelect = roleSelect.split('|');
+        const roleText = document.getElementById('new-user-role-text').value.trim();
+        const level = parseInt(document.getElementById('new-user-level').value);
         
         showLoader();
         try {
-            const newUserDb = {
-                name: name,
-                role: dadosSelect[1],
-                access_level: parseInt(dadosSelect[0]),
-                email: email
-            };
+            if (editingUserId) {
+                const { error } = await supabaseClient
+                    .from('lms_team')
+                    .update({ name: name, role: roleText, access_level: level })
+                    .eq('id', editingUserId);
 
-            const { data, error } = await supabaseClient.from('lms_team').insert([newUserDb]).select().single();
-            if (error) throw error;
+                if (error) throw error;
 
-            lmsTeam.push({
-                id: data.id,
-                name: data.name,
-                role: data.role,
-                accessLevel: data.access_level,
-                email: data.email
-            }); 
-            
-            renderTeamTable(); 
-            populateAssignees(); 
-            newForm.reset();
-            showToast("Colaborador cadastrado no banco de dados!", "success");
+                const userIndex = lmsTeam.findIndex(u => u.id === editingUserId);
+                if (userIndex !== -1) {
+                    lmsTeam[userIndex].name = name;
+                    lmsTeam[userIndex].role = roleText;
+                    lmsTeam[userIndex].accessLevel = level;
+                }
+
+                renderTeamTable();
+                populateAssignees();
+                cancelUserEdit();
+                showToast("Cargo e dados atualizados com sucesso!", "success");
+                
+            } else {
+                const maxId = lmsTeam.length > 0 ? Math.max(...lmsTeam.map(u => u.id)) : 0;
+                const nextId = maxId + 1;
+
+                const newUserDb = {
+                    id: nextId,
+                    name: name,
+                    role: roleText,
+                    access_level: level,
+                    email: email
+                };
+
+                const { data, error } = await supabaseClient.from('lms_team').insert([newUserDb]).select().single();
+                if (error) throw error;
+
+                lmsTeam.push({
+                    id: data.id,
+                    name: data.name,
+                    role: data.role,
+                    accessLevel: data.access_level,
+                    email: data.email,
+                    customPermissions: {} 
+                }); 
+                
+                renderTeamTable(); 
+                populateAssignees(); 
+                newForm.reset();
+                showToast("Colaborador cadastrado no banco de dados!", "success");
+            }
         } catch (err) {
             console.error(err);
-            showToast("Erro ao cadastrar. O e-mail já existe?", "error");
+            if (err.code === '23505') {
+                showToast("Erro: Este e-mail já pertence a outro colaborador.", "error");
+            } else {
+                showToast("Erro ao processar a solicitação.", "error");
+            }
         }
         hideLoader();
     });
+}
+
+// LOGICA DE PERMISSÕES AUTONOMAS NÍVEL 2
+function renderPermUserSelect() {
+    const select = document.getElementById('perm-user-select');
+    if (!select) return;
+    
+    select.innerHTML = '<option value="">Selecione um Colaborador de Nível 2...</option>';
+    
+    // Mostra apenas Nível 2 na lista de autonomia
+    lmsTeam.filter(u => u.accessLevel === 2).forEach(user => {
+        select.innerHTML += `<option value="${user.id}">${user.name} (${user.role})</option>`;
+    });
+
+    select.addEventListener('change', loadPermissionsUser);
+}
+
+function loadPermissionsUser() {
+    const userId = parseInt(document.getElementById('perm-user-select').value);
+    const configArea = document.getElementById('perm-config-area');
+    
+    if (!userId) {
+        configArea.classList.add('hidden');
+        return;
+    }
+
+    const user = lmsTeam.find(u => u.id === userId);
+    const perms = user.customPermissions || {};
+    
+    document.getElementById('perm-can-create').checked = perms.can_create_tasks || false;
+    
+    const container = document.getElementById('perm-folders-container');
+    container.innerHTML = '';
+    
+    const allowed = perms.allowed_folders || {};
+
+    lmsFolders.forEach(folder => {
+        const isFolderChecked = allowed.hasOwnProperty(folder.name);
+        let subsHtml = '';
+        
+        if (folder.subfolders && folder.subfolders.length > 0) {
+            folder.subfolders.forEach(sub => {
+                const isSubChecked = isFolderChecked && allowed[folder.name].includes(sub);
+                subsHtml += `
+                    <label style="display: flex; align-items: center; gap: 5px; margin-left: 25px; font-size: 0.9rem; color: var(--texto-escuro);">
+                        <input type="checkbox" class="perm-subfolder" data-parent="${folder.name}" value="${sub}" ${isSubChecked ? 'checked' : ''}>
+                        ${sub}
+                    </label>
+                `;
+            });
+        }
+
+        container.innerHTML += `
+            <div style="margin-bottom: 10px; background: white; padding: 10px; border-radius: 4px; border: 1px solid var(--borda);">
+                <label style="display: flex; align-items: center; gap: 8px; font-weight: bold; color: var(--cor-azul-forte); margin-bottom: 8px;">
+                    <input type="checkbox" class="perm-folder" value="${folder.name}" ${isFolderChecked ? 'checked' : ''} onchange="toggleSubfolders(this, '${folder.name}')">
+                    ${folder.name}
+                </label>
+                <div style="display: flex; flex-direction: column; gap: 5px;">
+                    ${subsHtml}
+                </div>
+            </div>
+        `;
+    });
+
+    configArea.classList.remove('hidden');
+}
+
+window.toggleSubfolders = function(folderCheckbox, folderName) {
+    const subs = document.querySelectorAll(`.perm-subfolder[data-parent="${folderName}"]`);
+    subs.forEach(sub => sub.checked = folderCheckbox.checked);
+}
+
+window.savePermissions = async function() {
+    const userId = parseInt(document.getElementById('perm-user-select').value);
+    if (!userId) return;
+
+    const canCreate = document.getElementById('perm-can-create').checked;
+    const allowedFolders = {};
+
+    // Mapeia todas as caixas de pastas que foram marcadas
+    document.querySelectorAll('.perm-folder:checked').forEach(fCb => {
+        const folderName = fCb.value;
+        allowedFolders[folderName] = [];
+        
+        // Pega as subpastas marcadas que pertencem a essa pasta mãe
+        document.querySelectorAll(`.perm-subfolder[data-parent="${folderName}"]:checked`).forEach(sCb => {
+            allowedFolders[folderName].push(sCb.value);
+        });
+    });
+
+    const newPerms = {
+        can_create_tasks: canCreate,
+        allowed_folders: allowedFolders
+    };
+
+    showLoader();
+    try {
+        const { error } = await supabaseClient.from('lms_team')
+            .update({ custom_permissions: newPerms })
+            .eq('id', userId);
+
+        if (error) throw error;
+
+        const userIndex = lmsTeam.findIndex(u => u.id === userId);
+        if (userIndex !== -1) {
+            lmsTeam[userIndex].customPermissions = newPerms;
+        }
+
+        showToast("Permissões de autonomia salvas com sucesso!", "success");
+    } catch (err) {
+        console.error(err);
+        showToast("Erro ao salvar permissões.", "error");
+    }
+    hideLoader();
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -379,9 +606,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         setupAddUserForm();
         setupFolderAdminForms();
         renderFoldersAdminList();
+        renderPermUserSelect();
         
-        const btnExport = document.getElementById('btn-export-csv');
-        if(btnExport) btnExport.addEventListener('click', exportToCSV);
+        const btnExport = document.getElementById('btn-export-excel');
+        if(btnExport) btnExport.addEventListener('click', exportToExcel);
     }
     
     populateFolderSelects();
@@ -389,5 +617,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupTaskForm();
     renderSystemData();
     
+    // A GRANDE MÁGICA: Se for nível 2, mas tiver autonomia, exibe o painel de criar tarefas
+    if (currentUser.accessLevel === 2 && currentUser.customPermissions && currentUser.customPermissions.can_create_tasks) {
+        const adminPanel = document.getElementById('admin-panel');
+        if (adminPanel) adminPanel.classList.remove('hidden');
+    }
+
     hideLoader(); 
 });
