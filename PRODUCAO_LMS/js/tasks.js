@@ -10,6 +10,16 @@ function populateFolderSelects() {
     if (folderSelect) {
         folderSelect.innerHTML = '<option value="">Selecione a Pasta...</option>';
         lmsFolders.forEach(folder => {
+            
+            // TRAVA DE SEGURANÇA PARA O NÍVEL 2 (AUTONOMIA)
+            if (currentUser.accessLevel === 2) {
+                const allowedFolders = currentUser.customPermissions?.allowed_folders || {};
+                // Se a pasta atual não estiver na lista de permitidas dele, ele pula e não mostra no formulário
+                if (!allowedFolders.hasOwnProperty(folder.name)) {
+                    return; 
+                }
+            }
+
             folderSelect.innerHTML += `<option value="${folder.name}">${folder.name}</option>`;
         });
 
@@ -66,8 +76,20 @@ function handleFolderChange(e) {
 
     subfolderSelect.innerHTML = '<option value="">Nenhuma / Geral</option>';
     const found = lmsFolders.find(f => f.name === selectedFolderName);
+    
     if (found && found.subfolders) {
         found.subfolders.forEach(sub => {
+            
+            // TRAVA DE SEGURANÇA (SUBPASTA) PARA O NÍVEL 2
+            if (currentUser.accessLevel === 2) {
+                const allowedFolders = currentUser.customPermissions?.allowed_folders || {};
+                const allowedSubs = allowedFolders[selectedFolderName] || [];
+                // Se não estiver na lista de permitidas dele, pula e não exibe
+                if (!allowedSubs.includes(sub)) {
+                    return; 
+                }
+            }
+
             subfolderSelect.innerHTML += `<option value="${sub}">${sub}</option>`;
         });
     }
@@ -101,17 +123,34 @@ function populateAssignees() {
     }
 }
 
-// INTEGRAÇÃO REAL: UPDATE Status
 function changeTaskStatus(taskId, newStatus) {
     showLoader();
     setTimeout(async () => {
         try {
-            const { error } = await supabaseClient.from('lms_tasks').update({ status: newStatus }).eq('id', taskId);
+            let updateData = { status: newStatus };
+
+            if (newStatus === 'Concluído') {
+                updateData.completed_at = new Date().toISOString();
+                updateData.completed_by = currentUser.name;
+            } else {
+                updateData.completed_at = null;
+                updateData.completed_by = null;
+            }
+
+            const { error } = await supabaseClient.from('lms_tasks').update(updateData).eq('id', taskId);
             if (error) throw error;
 
             const taskIndex = tasks.findIndex(t => t.id === taskId);
             if (taskIndex !== -1) {
-                tasks[taskIndex].status = newStatus; 
+                tasks[taskIndex].status = newStatus;
+                if (newStatus === 'Concluído') {
+                    tasks[taskIndex].completed_at = updateData.completed_at;
+                    tasks[taskIndex].completed_by = updateData.completed_by;
+                } else {
+                    tasks[taskIndex].completed_at = null;
+                    tasks[taskIndex].completed_by = null;
+                }
+
                 if (typeof renderSystemData === 'function') {
                     renderSystemData();
                 } else {
@@ -128,7 +167,6 @@ function changeTaskStatus(taskId, newStatus) {
     }, 100); 
 }
 
-// INTEGRAÇÃO REAL: UPDATE Observations
 function saveObservation(taskId) {
     showLoader();
     setTimeout(async () => {
@@ -149,11 +187,9 @@ function saveObservation(taskId) {
                         text: obsText
                     });
 
-                    // Grava no banco
                     const { error } = await supabaseClient.from('lms_tasks').update({ observations: currentObs }).eq('id', taskId);
                     if (error) throw error;
 
-                    // Atualiza local e renderiza
                     tasks[taskIndex].observations = currentObs;
                     if (typeof renderSystemData === 'function') {
                         renderSystemData();
@@ -260,7 +296,6 @@ window.cancelEdit = function() {
     }
 }
 
-// INTEGRAÇÃO REAL: DELETE Task
 window.deleteTask = function(taskId) {
     if (confirm("⚠️ TEM CERTEZA? Esta ação excluirá a tarefa permanentemente do banco de dados!")) {
         showLoader();
@@ -315,6 +350,7 @@ function matchesFilters(task, searchId, assigneeId, statusId, priorityId) {
     return assignedUserMatch && statusMatch && priorityMatch && matchesText;
 }
 
+// CORREÇÃO: Uso de folderIndex e subIndex para garantir IDs HTML únicos
 function renderTasks() {
     const container = document.getElementById('folders-container');
     if (!container) return;
@@ -326,7 +362,7 @@ function renderTasks() {
 
     container.innerHTML = '';
 
-    lmsFolders.forEach(folder => {
+    lmsFolders.forEach((folder, folderIndex) => {
         const folderTasks = tasks.filter(t => t.folder === folder.name && (!t.subfolder || t.subfolder === '') && t.status !== 'Concluído');
         const visibleFolderTasks = folderTasks.filter(t => (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, searchStatus, searchPriority));
         visibleFolderTasks.sort(sortTasks);
@@ -336,7 +372,7 @@ function renderTasks() {
         let subfoldersHtml = '';
 
         if (folder.subfolders && folder.subfolders.length > 0) {
-            folder.subfolders.forEach(sub => {
+            folder.subfolders.forEach((sub, subIndex) => {
                 const subTasks = tasks.filter(t => t.folder === folder.name && t.subfolder === sub && t.status !== 'Concluído');
                 const visibleSubTasks = subTasks.filter(t => (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, searchStatus, searchPriority));
                 visibleSubTasks.sort(sortTasks);
@@ -349,11 +385,11 @@ function renderTasks() {
 
                     subfoldersHtml += `
                         <div class="subfolder-item" style="margin-top: 10px; border-left: 3px solid var(--cor-verde-lima); padding-left: 10px;">
-                            <div class="subfolder-header" onclick="toggleAccordion('sub-${folder.id}-${sub.replace(/[^a-zA-Z0-9]/g, '')}')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px; background: var(--fundo-pagina); border-radius: 4px;">
+                            <div class="subfolder-header" onclick="toggleAccordion('sub-${folderIndex}-${subIndex}')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px; background: var(--fundo-pagina); border-radius: 4px;">
                                 <span style="font-weight: 600; font-size: 0.95rem; color: var(--cor-azul-forte);">📁 Subpasta: ${sub}</span>
                                 <span class="badge-access level-2" style="background-color: var(--cor-azul-forte);">(${visibleSubTasks.length})</span>
                             </div>
-                            <div id="sub-${folder.id}-${sub.replace(/[^a-zA-Z0-9]/g, '')}" class="accordion-content hidden" style="margin-top: 10px;">
+                            <div id="sub-${folderIndex}-${subIndex}" class="accordion-content hidden" style="margin-top: 10px;">
                                 ${subTasksCardsHtml}
                             </div>
                         </div>
@@ -380,11 +416,11 @@ function renderTasks() {
         folderDiv.style.marginBottom = '15px';
 
         folderDiv.innerHTML = `
-            <div class="folder-header" onclick="toggleAccordion('folder-${folder.id}')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: var(--fundo-pagina); border-bottom: 1px solid var(--borda);">
+            <div class="folder-header" onclick="toggleAccordion('folder-${folderIndex}')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: var(--fundo-pagina); border-bottom: 1px solid var(--borda);">
                 <span style="font-weight: bold; font-size: 1.1rem; color: var(--cor-azul-forte);">📂 ${folder.name}</span>
                 <span class="badge-access level-1" style="background-color: var(--cor-laranja); font-size: 0.85rem;">Tarefas: ${totalFolderCount}</span>
             </div>
-            <div id="folder-${folder.id}" class="accordion-content hidden" style="padding: 15px 20px;">
+            <div id="folder-${folderIndex}" class="accordion-content hidden" style="padding: 15px 20px;">
                 ${directTasksHtml}
                 ${subfoldersHtml}
                 ${totalFolderCount === 0 ? '<p style="color: var(--texto-mutado); font-size: 0.9rem;">Nenhuma tarefa encontrada com os filtros aplicados.</p>' : ''}
@@ -405,7 +441,7 @@ function renderHistoryTasks() {
 
     container.innerHTML = '';
 
-    lmsFolders.forEach(folder => {
+    lmsFolders.forEach((folder, folderIndex) => {
         const folderTasks = tasks.filter(t => t.folder === folder.name && (!t.subfolder || t.subfolder === '') && t.status === 'Concluído');
         const visibleFolderTasks = folderTasks.filter(t => (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, 'Concluído', searchPriority));
         visibleFolderTasks.sort(sortTasks);
@@ -415,7 +451,7 @@ function renderHistoryTasks() {
         let subfoldersHtml = '';
 
         if (folder.subfolders && folder.subfolders.length > 0) {
-            folder.subfolders.forEach(sub => {
+            folder.subfolders.forEach((sub, subIndex) => {
                 const subTasks = tasks.filter(t => t.folder === folder.name && t.subfolder === sub && t.status === 'Concluído');
                 const visibleSubTasks = subTasks.filter(t => (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, 'Concluído', searchPriority));
                 visibleSubTasks.sort(sortTasks);
@@ -428,11 +464,11 @@ function renderHistoryTasks() {
 
                     subfoldersHtml += `
                         <div class="subfolder-item" style="margin-top: 10px; border-left: 3px solid var(--cor-verde-lima); padding-left: 10px;">
-                            <div class="subfolder-header" onclick="toggleAccordion('hist-sub-${folder.id}-${sub.replace(/[^a-zA-Z0-9]/g, '')}')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px; background: var(--fundo-pagina); border-radius: 4px;">
+                            <div class="subfolder-header" onclick="toggleAccordion('hist-sub-${folderIndex}-${subIndex}')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px; background: var(--fundo-pagina); border-radius: 4px;">
                                 <span style="font-weight: 600; font-size: 0.95rem; color: var(--cor-azul-forte);">📁 Subpasta: ${sub}</span>
                                 <span class="badge-access level-2" style="background-color: var(--cor-azul-forte);">(${visibleSubTasks.length})</span>
                             </div>
-                            <div id="hist-sub-${folder.id}-${sub.replace(/[^a-zA-Z0-9]/g, '')}" class="accordion-content hidden" style="margin-top: 10px;">
+                            <div id="hist-sub-${folderIndex}-${subIndex}" class="accordion-content hidden" style="margin-top: 10px;">
                                 ${subTasksCardsHtml}
                             </div>
                         </div>
@@ -459,11 +495,11 @@ function renderHistoryTasks() {
         folderDiv.style.marginBottom = '15px';
 
         folderDiv.innerHTML = `
-            <div class="folder-header" onclick="toggleAccordion('hist-folder-${folder.id}')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: var(--fundo-pagina); border-bottom: 1px solid var(--borda);">
+            <div class="folder-header" onclick="toggleAccordion('hist-folder-${folderIndex}')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: var(--fundo-pagina); border-bottom: 1px solid var(--borda);">
                 <span style="font-weight: bold; font-size: 1.1rem; color: var(--cor-azul-forte);">📂 ${folder.name}</span>
                 <span class="badge-access level-1" style="background-color: var(--cor-verde-lima); font-size: 0.85rem;">Concluídas: ${totalFolderCount}</span>
             </div>
-            <div id="hist-folder-${folder.id}" class="accordion-content hidden" style="padding: 15px 20px;">
+            <div id="hist-folder-${folderIndex}" class="accordion-content hidden" style="padding: 15px 20px;">
                 ${directTasksHtml}
                 ${subfoldersHtml}
                 ${totalFolderCount === 0 ? '<p style="color: var(--texto-mutado); font-size: 0.9rem;">Nenhuma tarefa encontrada com os filtros aplicados.</p>' : ''}
@@ -562,7 +598,6 @@ window.toggleAccordion = function(elementId) {
     }
 }
 
-// INTEGRAÇÃO REAL: INSERT E UPDATE Tasks
 function setupTaskForm() {
     const form = document.getElementById('task-form');
     if (!form) return;
@@ -681,7 +716,6 @@ function setupTaskForm() {
                     const { data, error } = await supabaseClient.from('lms_tasks').insert([newTaskDb]).select().single();
                     if (error) throw error;
                     
-                    // Adiciona na memória apenas o dado que o banco retornou com o ID oficial
                     tasks.push(data);
                     
                     showToast('Tarefa salva no banco e atribuída!', 'success');
