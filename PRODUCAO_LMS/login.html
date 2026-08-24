@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Gestão LMS</title>
+    
+    <link rel="icon" type="image/png" href="assets/img/iconeguia.jfif">
+    
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; background-color: var(--fundo-pagina); }
+        .login-card { background-color: var(--fundo-card); padding: 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; border: 1px solid var(--borda); }
+        .login-logo { max-width: 150px; margin-bottom: 10px; }
+        .login-card h2 { color: var(--cor-azul-forte); margin-bottom: 30px; font-size: 1.5rem; }
+        .login-card label { text-align: left; color: var(--cor-azul-forte); font-weight: bold; }
+        .login-card input { margin-bottom: 20px; }
+        .error-msg { color: var(--cor-laranja); font-size: 0.85rem; margin-bottom: 15px; display: none; font-weight: bold; }
+        .success-msg { color: var(--cor-verde-lima); font-size: 0.85rem; margin-bottom: 15px; display: none; font-weight: bold; }
+        .link-form { display: block; margin-top: 15px; font-size: 0.85rem; color: var(--cor-azul-forte); text-decoration: none; font-weight: 500; }
+        .link-form:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+    <div class="login-card">
+        <img src="assets/img/logounisa.png" alt="Logo Unisa" class="login-logo">
+        <h2 id="form-title">Acesso ao Sistema<br> Produção LMS</h2>
+
+        <p id="error-message" class="error-msg"></p>
+        <p id="success-message" class="success-msg"></p>
+
+        <form id="login-form">
+            <div class="form-group">
+                <label for="login-email">E-mail Corporativo</label>
+                <input type="email" id="login-email" placeholder="Ex: e-mail cadastrado" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="login-pass">Senha</label>
+                <input type="password" id="login-pass" placeholder="Digite sua senha" required>
+            </div>
+
+            <button type="submit" class="btn-primary" style="background-color: var(--cor-azul-forte);">Entrar no Sistema</button>
+            <a href="#" id="link-forgot-pass" class="link-form">Esqueceu sua senha? Redefinir agora.</a>
+        </form>
+
+        <form id="reset-form" style="display: none;">
+            <p style="font-size: 0.9rem; color: var(--texto-mutado); margin-bottom: 20px; text-align: left;">
+                Informe seu e-mail corporativo. O sistema enviará um link seguro para redefinição.
+            </p>
+            <div class="form-group">
+                <label for="reset-email">E-mail Corporativo</label>
+                <input type="email" id="reset-email" placeholder="Digite seu e-mail" required>
+            </div>
+
+            <button type="submit" class="btn-primary" style="background-color: var(--cor-laranja);">Receber Link de Redefinição</button>
+            <a href="#" id="link-back-login" class="link-form">← Voltar para o Login</a>
+        </form>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+    
+    <script>
+        const loginForm = document.getElementById('login-form');
+        const resetForm = document.getElementById('reset-form');
+        const formTitle = document.getElementById('form-title');
+        const errorMsg = document.getElementById('error-message');
+        const successMsg = document.getElementById('success-message');
+        
+        document.getElementById('link-forgot-pass').addEventListener('click', function(e) {
+            e.preventDefault();
+            loginForm.style.display = 'none';
+            resetForm.style.display = 'block';
+            formTitle.textContent = 'Redefinir Senha';
+            errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
+        });
+
+        document.getElementById('link-back-login').addEventListener('click', function(e) {
+            e.preventDefault();
+            resetForm.style.display = 'none';
+            loginForm.style.display = 'block';
+            formTitle.textContent = 'Acesso ao Sistema LMS';
+            errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
+        });
+
+        // AUTENTICAÇÃO OFICIAL SUPABASE
+        loginForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            errorMsg.style.display = 'none';
+            
+            const typedEmail = document.getElementById('login-email').value.trim().toLowerCase();
+            const typedPass = document.getElementById('login-pass').value;
+            
+            const submitBtn = loginForm.querySelector('button[type="submit"]');
+            const originalBtnText = submitBtn.textContent;
+            submitBtn.textContent = 'Autenticando...';
+            submitBtn.disabled = true;
+
+            try {
+                // 1. Aciona o login oficial que gera o Token de Segurança e dribla o RLS
+                const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+                    email: typedEmail,
+                    password: typedPass
+                });
+
+                if (authError) {
+                    errorMsg.textContent = 'E-mail ou senha incorretos!';
+                    errorMsg.style.display = 'block';
+                    submitBtn.textContent = originalBtnText;
+                    submitBtn.disabled = false;
+                    return;
+                }
+
+                // 2. Agora que o login deu certo, buscamos o ID dele na nossa tabela (para não quebrar o resto do sistema)
+                const { data: userFound, error: dbError } = await supabaseClient
+                    .from('lms_team')
+                    .select('*')
+                    .eq('email', typedEmail)
+                    .single();
+
+                if (userFound && !dbError) {
+                    localStorage.setItem('lms_logged_user_id', userFound.id);
+                    window.location.href = 'index.html';
+                } else {
+                    errorMsg.textContent = 'Usuário autenticado, mas não localizado na tabela de equipe.';
+                    errorMsg.style.display = 'block';
+                    submitBtn.textContent = originalBtnText;
+                    submitBtn.disabled = false;
+                }
+
+            } catch (err) {
+                console.error("Erro no Supabase:", err);
+                errorMsg.textContent = 'Erro de comunicação com os servidores.';
+                errorMsg.style.display = 'block';
+                submitBtn.textContent = originalBtnText;
+                submitBtn.disabled = false;
+            }
+        });
+
+        // ENVIO DE REDEFINIÇÃO DE SENHA (Oficial)
+        resetForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
+
+            const typedEmail = document.getElementById('reset-email').value.trim().toLowerCase();
+            const submitBtn = resetForm.querySelector('button[type="submit"]');
+            submitBtn.textContent = 'Enviando Link...';
+            submitBtn.disabled = true;
+
+            try {
+                const { data, error } = await supabaseClient.auth.resetPasswordForEmail(typedEmail);
+
+                if (error) {
+                    errorMsg.textContent = 'Ocorreu um erro ao enviar o link. Verifique o e-mail.';
+                    errorMsg.style.display = 'block';
+                } else {
+                    successMsg.textContent = 'Link de redefinição enviado com sucesso (verifique também a caixa de spam).';
+                    successMsg.style.display = 'block';
+                    resetForm.reset();
+                }
+            } catch (err) {
+                errorMsg.textContent = 'Erro ao comunicar com o servidor de e-mails.';
+                errorMsg.style.display = 'block';
+            } finally {
+                submitBtn.textContent = 'Receber Link de Redefinição';
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
