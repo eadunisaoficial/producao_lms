@@ -14,8 +14,8 @@
         
         <aside class="sidebar">
             <div class="brand">
-                <img src="assets/img/logounisa2.png" alt="Logo Unisa" class="sidebar-logo">
-                <h2>GESTÃO LMS</h2>
+                <img src="assets/img/logounisa.png" alt="Logo Unisa" class="sidebar-logo">
+                <h2>Produção LMS</h2>
             </div>
             
             <nav id="sidebar-nav">
@@ -197,7 +197,7 @@
                 <div class="panel">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                         <h2>Extrato Geral de Tarefas</h2>
-                        <button id="btn-export-csv" class="btn-primary" style="width: auto; margin-top: 0; background-color: var(--cor-verde-lima);">📥 Exportar para Excel (CSV)</button>
+                        <button id="btn-export-excel" class="btn-primary" style="width: auto; margin-top: 0; background-color: var(--cor-verde-lima);">📥 Exportar para Excel (.xlsx)</button>
                     </div>
                     <div class="table-responsive">
                         <table class="data-table">
@@ -260,25 +260,24 @@
                 </header>
                 
                 <div class="panel">
-                    <h2>Adicionar Novo Colaborador</h2>
+                    <h2 id="form-user-title">Adicionar Novo Colaborador</h2>
                     <form id="add-user-form">
                         <div class="form-row">
                             <input type="text" id="new-user-name" placeholder="Nome do Colaborador" required>
                             <input type="email" id="new-user-email" placeholder="E-mail Corporativo" required>
                         </div>
                         <div class="form-row">
-                            <select id="new-user-role" required>
-                                <option value="">Selecione o Cargo...</option>
-                                <option value="1|Supervisor (Manhã)">Supervisor (Manhã) - Acesso Total</option>
-                                <option value="1|Supervisor (Noturno)">Supervisor (Noturno) - Acesso Total</option>
-                                <option value="1|Analista III (Manhã)">Analista III - Acesso Total</option>
-                                <option value="2|Analista II (Manhã)">Analista II - Acesso Operacional</option>
-                                <option value="2|Analista I (Manhã)">Analista I - Acesso Operacional</option>
-                                <option value="2|Analista I (Noturno)">Analista I (Noturno) - Acesso Operacional</option>
-                                <option value="2|Assistente (Noturno)">Assistente (Noturno) - Acesso Operacional</option>
+                            <input type="text" id="new-user-role-text" placeholder="Cargo e Turno (Ex: Analista II - Manhã)" required>
+                            <select id="new-user-level" required>
+                                <option value="">Selecione o Nível de Acesso...</option>
+                                <option value="1">Nível 1 - Acesso Total (Gestão)</option>
+                                <option value="2">Nível 2 - Acesso Operacional</option>
                             </select>
                         </div>
-                        <button type="submit" class="btn-primary" style="width: auto;">Cadastrar na Equipe</button>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button type="submit" id="btn-submit-user" class="btn-primary" style="width: auto; margin: 0;">Cadastrar na Equipe</button>
+                            <button type="button" id="btn-cancel-user-edit" class="btn-sm hidden" style="background-color: var(--cor-laranja); color: white;" onclick="cancelUserEdit()">Cancelar Edição</button>
+                        </div>
                     </form>
                 </div>
 
@@ -299,6 +298,33 @@
                         </table>
                     </div>
                 </div>
+
+                <!-- NOVO PAINEL: PERMISSÕES ESPECIAIS (AUTONOMIA) -->
+                <div class="panel">
+                    <h2>Permissões Especiais (Autonomia)</h2>
+                    <p style="font-size: 0.9rem; color: var(--texto-mutado); margin-bottom: 15px;">Autorize membros específicos de Nível 2 a criarem tarefas dentro das pastas que você definir.</p>
+                    
+                    <div class="form-row">
+                        <select id="perm-user-select" style="max-width: 400px;">
+                            <option value="">Selecione um Colaborador de Nível 2...</option>
+                        </select>
+                    </div>
+
+                    <div id="perm-config-area" class="hidden" style="margin-top: 15px; border-top: 1px dashed var(--borda); padding-top: 15px;">
+                        <label style="display: flex; align-items: center; gap: 8px; font-weight: bold; color: var(--cor-azul-forte); margin-bottom: 20px;">
+                            <input type="checkbox" id="perm-can-create" style="width: auto; transform: scale(1.2);">
+                            Habilitar "Criação de Tarefas" para este colaborador
+                        </label>
+                        
+                        <h3 style="font-size: 1rem; margin-bottom: 15px;">Pastas e Subpastas Permitidas:</h3>
+                        <div id="perm-folders-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; background: var(--fundo-pagina); padding: 20px; border-radius: 6px; border: 1px solid var(--borda);">
+                            <!-- Gerado via JavaScript -->
+                        </div>
+
+                        <button type="button" onclick="savePermissions()" class="btn-primary" style="width: auto; margin-top: 20px; background-color: var(--cor-laranja);">💾 Salvar Permissões do Colaborador</button>
+                    </div>
+                </div>
+
             </div>
 
         </main>
@@ -314,6 +340,9 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
     <script>emailjs.init("XmrkXq2vSBpjBSRYy");</script>
+
+    <!-- Biblioteca SheetJS para exportar XLSX oficial -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
     <!-- Supabase -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
