@@ -162,21 +162,23 @@ function exportToExcel() {
         }
 
         let chatCompleto = "Sem observações";
-        if (Array.isArray(task.observations) && task.observations.length > 0) {
-            chatCompleto = task.observations.map(obs => {
+        const safeObservations = task.observations || [];
+        if (Array.isArray(safeObservations) && safeObservations.length > 0) {
+            chatCompleto = safeObservations.map(obs => {
                 return `[${obs.date}] ${obs.author}: ${obs.text}`;
             }).join('\n\n');
         }
 
-        const assignedNames = task.assignees.map(id => {
+        const safeAssignees = task.assignees || [];
+        const assignedNames = safeAssignees.map(id => {
             const u = lmsTeam.find(user => user.id === id);
             return u ? u.name : 'Desconhecido';
         }).join(', ');
 
-        // NOVA LÓGICA DE PROGRESSO INDIVIDUAL DETALHADO NO EXCEL
         let detalheConclusao = "";
         let completions = task.individual_completions || {};
-        task.assignees.forEach(userId => {
+        
+        safeAssignees.forEach(userId => {
             const u = lmsTeam.find(user => user.id === userId);
             const userName = u ? u.name : 'Desconhecido';
             if (completions[userId]) {
@@ -186,7 +188,7 @@ function exportToExcel() {
                 detalheConclusao += `${userName}: Pendente | `;
             }
         });
-        detalheConclusao = detalheConclusao.replace(/ \| $/, ''); // Limpa a última barra
+        detalheConclusao = detalheConclusao.replace(/ \| $/, ''); 
         if (detalheConclusao === "") detalheConclusao = "Ninguém atribuído";
 
         return {
@@ -212,7 +214,6 @@ function exportToExcel() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Relatório_Tarefas_LMS");
 
-    // Adicionado o tamanho da nova coluna "Progresso Detalhado" {wch: 60}
     const wscols = [
         {wch: 10}, {wch: 40}, {wch: 20}, {wch: 20}, {wch: 15}, {wch: 15},
         {wch: 35}, {wch: 60}, {wch: 20}, {wch: 20}, {wch: 20}, {wch: 35}, {wch: 25},
@@ -605,36 +606,41 @@ window.savePermissions = async function() {
     hideLoader();
 }
 
+// LÓGICA ATUALIZADA: Blindagem com try...catch...finally para impedir loop infinito
 document.addEventListener('DOMContentLoaded', async () => {
     showLoader(); 
-    
-    if (typeof carregarDadosDoBanco === 'function') {
-        await carregarDadosDoBanco();
-    }
+    try {
+        if (typeof carregarDadosDoBanco === 'function') {
+            await carregarDadosDoBanco();
+        }
 
-    initializeAuthentication();
-    setupNavigation(); 
-    
-    if (currentUser.accessLevel === 1) {
-        renderTeamTable();
-        setupAddUserForm();
-        setupFolderAdminForms();
-        renderFoldersAdminList();
-        renderPermUserSelect();
+        initializeAuthentication();
+        setupNavigation(); 
         
-        const btnExport = document.getElementById('btn-export-excel');
-        if(btnExport) btnExport.addEventListener('click', exportToExcel);
+        if (currentUser.accessLevel === 1) {
+            renderTeamTable();
+            setupAddUserForm();
+            setupFolderAdminForms();
+            renderFoldersAdminList();
+            renderPermUserSelect();
+            
+            const btnExport = document.getElementById('btn-export-excel');
+            if(btnExport) btnExport.addEventListener('click', exportToExcel);
+        }
+        
+        populateFolderSelects();
+        populateAssignees();
+        setupTaskForm();
+        renderSystemData();
+        
+        if (currentUser.accessLevel === 2 && currentUser.customPermissions && currentUser.customPermissions.can_create_tasks) {
+            const adminPanel = document.getElementById('admin-panel');
+            if (adminPanel) adminPanel.classList.remove('hidden');
+        }
+    } catch (error) {
+        console.error("Erro Crítico na inicialização do sistema:", error);
+        showToast("Alguns dados antigos não puderam ser processados perfeitamente.", "error");
+    } finally {
+        hideLoader(); 
     }
-    
-    populateFolderSelects();
-    populateAssignees();
-    setupTaskForm();
-    renderSystemData();
-    
-    if (currentUser.accessLevel === 2 && currentUser.customPermissions && currentUser.customPermissions.can_create_tasks) {
-        const adminPanel = document.getElementById('admin-panel');
-        if (adminPanel) adminPanel.classList.remove('hidden');
-    }
-
-    hideLoader(); 
 });
