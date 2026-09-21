@@ -143,7 +143,7 @@ function changeTaskStatus(taskId, newStatus) {
     }, 100); 
 }
 
-// NOVA FUNÇÃO: Marca a conclusão individual e, se todos concluíram, fecha a tarefa automaticamente.
+// LÓGICA ATUALIZADA: Blindagem com arrays seguros
 window.markIndividualCompletion = function(taskId) {
     showLoader();
     setTimeout(async () => {
@@ -153,14 +153,14 @@ window.markIndividualCompletion = function(taskId) {
 
             let task = tasks[taskIndex];
             let completions = task.individual_completions || {};
+            let safeAssignees = task.assignees || [];
             
-            // Marca a data de conclusão da pessoa logada
             completions[currentUser.id] = new Date().toISOString();
 
             let updateData = { individual_completions: completions };
 
-            // O pulo do gato: verifica se todos os membros escalados já concluíram
-            let allCompleted = task.assignees.every(userId => completions[userId] != null);
+            // Verifica se todos finalizaram protegendo contra arrays vazios
+            let allCompleted = safeAssignees.length > 0 && safeAssignees.every(userId => completions[userId] != null);
 
             if (allCompleted) {
                 updateData.status = 'Concluído';
@@ -171,7 +171,6 @@ window.markIndividualCompletion = function(taskId) {
             const { error } = await supabaseClient.from('lms_tasks').update(updateData).eq('id', taskId);
             if (error) throw error;
 
-            // Atualiza os dados localmente
             task.individual_completions = completions;
             if (allCompleted) {
                 task.status = 'Concluído';
@@ -243,6 +242,7 @@ function saveObservation(taskId) {
     }, 100); 
 }
 
+// LÓGICA ATUALIZADA: Blindagem com arrays seguros
 window.editTask = function(taskId) {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
@@ -263,15 +263,18 @@ window.editTask = function(taskId) {
     document.getElementById('task-subfolder').value = task.subfolder || '';
 
     document.querySelectorAll('input[name="assignees"]').forEach(cb => cb.checked = false);
-    task.assignees.forEach(id => {
+    
+    const safeAssignees = task.assignees || [];
+    safeAssignees.forEach(id => {
         const cb = document.querySelector(`input[name="assignees"][value="${id}"]`);
         if (cb) cb.checked = true;
     });
 
     const linksContainer = document.getElementById('dynamic-links-container');
     linksContainer.innerHTML = '';
-    if (task.links && task.links.length > 0) {
-        task.links.forEach(link => {
+    const safeLinks = task.links || [];
+    if (safeLinks.length > 0) {
+        safeLinks.forEach(link => {
             const row = document.createElement('div');
             row.className = 'form-row link-row';
             row.style.marginBottom = '10px';
@@ -368,8 +371,10 @@ function sortTasks(a, b) {
     return b.id - a.id; 
 }
 
+// LÓGICA ATUALIZADA: Blindagem com arrays seguros
 function matchesFilters(task, searchId, assigneeId, statusId, priorityId) {
-    const assignedUserMatch = !assigneeId || task.assignees.includes(parseInt(assigneeId));
+    const safeAssignees = task.assignees || [];
+    const assignedUserMatch = !assigneeId || safeAssignees.includes(parseInt(assigneeId));
     const statusMatch = !statusId || task.status === statusId;
     const priorityMatch = !priorityId || task.priority === priorityId;
     
@@ -383,6 +388,7 @@ function matchesFilters(task, searchId, assigneeId, statusId, priorityId) {
     return assignedUserMatch && statusMatch && priorityMatch && matchesText;
 }
 
+// LÓGICA ATUALIZADA: Blindagem com arrays seguros
 function renderTasks() {
     const container = document.getElementById('folders-container');
     if (!container) return;
@@ -396,17 +402,17 @@ function renderTasks() {
 
     lmsFolders.forEach((folder, folderIndex) => {
         const folderTasks = tasks.filter(t => t.folder === folder.name && (!t.subfolder || t.subfolder === '') && t.status !== 'Concluído');
-        const visibleFolderTasks = folderTasks.filter(t => (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, searchStatus, searchPriority));
+        const visibleFolderTasks = folderTasks.filter(t => (currentUser.accessLevel === 1 || (t.assignees || []).includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, searchStatus, searchPriority));
         visibleFolderTasks.sort(sortTasks);
 
-        let totalFolderCount = tasks.filter(t => t.folder === folder.name && t.status !== 'Concluído' && (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, searchStatus, searchPriority)).length;
+        let totalFolderCount = tasks.filter(t => t.folder === folder.name && t.status !== 'Concluído' && (currentUser.accessLevel === 1 || (t.assignees || []).includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, searchStatus, searchPriority)).length;
 
         let subfoldersHtml = '';
 
         if (folder.subfolders && folder.subfolders.length > 0) {
             folder.subfolders.forEach((sub, subIndex) => {
                 const subTasks = tasks.filter(t => t.folder === folder.name && t.subfolder === sub && t.status !== 'Concluído');
-                const visibleSubTasks = subTasks.filter(t => (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, searchStatus, searchPriority));
+                const visibleSubTasks = subTasks.filter(t => (currentUser.accessLevel === 1 || (t.assignees || []).includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, searchStatus, searchPriority));
                 visibleSubTasks.sort(sortTasks);
 
                 if (visibleSubTasks.length > 0) {
@@ -463,6 +469,7 @@ function renderTasks() {
     });
 }
 
+// LÓGICA ATUALIZADA: Blindagem com arrays seguros
 function renderHistoryTasks() {
     const container = document.getElementById('history-folders-container');
     if (!container) return;
@@ -475,17 +482,17 @@ function renderHistoryTasks() {
 
     lmsFolders.forEach((folder, folderIndex) => {
         const folderTasks = tasks.filter(t => t.folder === folder.name && (!t.subfolder || t.subfolder === '') && t.status === 'Concluído');
-        const visibleFolderTasks = folderTasks.filter(t => (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, 'Concluído', searchPriority));
+        const visibleFolderTasks = folderTasks.filter(t => (currentUser.accessLevel === 1 || (t.assignees || []).includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, 'Concluído', searchPriority));
         visibleFolderTasks.sort(sortTasks);
 
-        let totalFolderCount = tasks.filter(t => t.folder === folder.name && t.status === 'Concluído' && (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, 'Concluído', searchPriority)).length;
+        let totalFolderCount = tasks.filter(t => t.folder === folder.name && t.status === 'Concluído' && (currentUser.accessLevel === 1 || (t.assignees || []).includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, 'Concluído', searchPriority)).length;
 
         let subfoldersHtml = '';
 
         if (folder.subfolders && folder.subfolders.length > 0) {
             folder.subfolders.forEach((sub, subIndex) => {
                 const subTasks = tasks.filter(t => t.folder === folder.name && t.subfolder === sub && t.status === 'Concluído');
-                const visibleSubTasks = subTasks.filter(t => (currentUser.accessLevel === 1 || t.assignees.includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, 'Concluído', searchPriority));
+                const visibleSubTasks = subTasks.filter(t => (currentUser.accessLevel === 1 || (t.assignees || []).includes(currentUser.id)) && matchesFilters(t, searchText, searchAssignee, 'Concluído', searchPriority));
                 visibleSubTasks.sort(sortTasks);
 
                 if (visibleSubTasks.length > 0) {
@@ -542,16 +549,18 @@ function renderHistoryTasks() {
     });
 }
 
-// LÓGICA ATUALIZADA: Constrói a lista visual de progresso dos envolvidos
+// LÓGICA ATUALIZADA: Blindagem com arrays seguros
 function buildTaskCardHtml(task) {
-    const assignedNames = task.assignees.map(id => {
+    const safeAssignees = task.assignees || [];
+    const assignedNames = safeAssignees.map(id => {
         const u = lmsTeam.find(user => user.id === id);
         return u ? u.name : 'Desconhecido';
     }).join(', ');
 
     const formattedDate = new Date(task.deadline).toLocaleString('pt-BR');
 
-    const linksHtml = task.links.map(link => {
+    const safeLinks = task.links || [];
+    const linksHtml = safeLinks.map(link => {
         if (typeof link === 'string') {
             return `<a href="${link}" target="_blank" class="task-link-box" title="Clique para abrir.">🔗 ${link}</a>`;
         } else if (link && link.url) {
@@ -564,13 +573,12 @@ function buildTaskCardHtml(task) {
     if (task.status === 'Em Andamento') statusColor = '#D97828'; 
     if (task.status === 'Concluído') statusColor = '#99BD2E'; 
 
-    // CALCULADORA DE PROGRESSO INDIVIDUAL DA TAREFA
     let completions = task.individual_completions || {};
-    let totalAssignees = task.assignees.length;
+    let totalAssignees = safeAssignees.length;
     let completedCount = 0;
     
     let progressListHtml = '';
-    task.assignees.forEach(userId => {
+    safeAssignees.forEach(userId => {
         const u = lmsTeam.find(user => user.id === userId);
         const userName = u ? u.name : 'Desconhecido';
         if (completions[userId]) {
@@ -593,14 +601,12 @@ function buildTaskCardHtml(task) {
         </div>`;
     }
 
-    // BOTÕES DE AÇÃO BASEADOS NO PROGRESSO
     let actionButtons = '';
     if (task.status === 'A Fazer') {
         actionButtons = `<button type="button" onclick="changeTaskStatus(${task.id}, 'Em Andamento')" class="btn-sm" style="margin-top: 15px; background-color: #D97828; color: white; width: 100%;">🚀 Iniciar Tarefa</button>`;
     } else if (task.status === 'Em Andamento') {
         actionButtons = progressHtml;
-        // Se a pessoa logada está na tarefa e ainda não ticou a própria caixa
-        if (task.assignees.includes(currentUser.id) && !completions[currentUser.id]) {
+        if (safeAssignees.includes(currentUser.id) && !completions[currentUser.id]) {
             actionButtons += `<button type="button" onclick="markIndividualCompletion(${task.id})" class="btn-sm" style="margin-top: 10px; background-color: #99BD2E; color: white; width: 100%;">✅ Finalizar Minha Parte</button>`;
         }
     } else if (task.status === 'Concluído') {
@@ -618,8 +624,9 @@ function buildTaskCardHtml(task) {
     }
 
     let historyHtml = '';
-    if (Array.isArray(task.observations) && task.observations.length > 0) {
-        historyHtml = task.observations.map(obs => `
+    const safeObservations = task.observations || [];
+    if (Array.isArray(safeObservations) && safeObservations.length > 0) {
+        historyHtml = safeObservations.map(obs => `
             <div style="margin-bottom: 10px; font-size: 0.85rem; padding-bottom: 5px; border-bottom: 1px solid #e2e8f0;">
                 <strong style="color: var(--cor-laranja);">${obs.author}</strong> <span style="color: var(--texto-mutado); font-size: 0.75rem;">- ${obs.date}</span><br>
                 <span style="color: var(--texto-escuro); display: block; margin-top: 3px;">${obs.text}</span>
@@ -778,7 +785,7 @@ function setupTaskForm() {
                         folder: folderVal,
                         subfolder: subfolderVal,
                         observations: [],
-                        individual_completions: {} // Adicionado proativamente
+                        individual_completions: {} 
                     };
                     
                     const { data, error } = await supabaseClient.from('lms_tasks').insert([newTaskDb]).select().single();
@@ -849,18 +856,3 @@ function setupTaskForm() {
         }, 100);
     });
 }
-```Para garantir uma inserção cirúrgica e não impactar o sistema que já está em produção, preciso visualizar a estrutura atual do seu projeto. Sem o código-fonte original, qualquer alteração seria baseada em suposições e correria o risco de quebrar as funcionalidades existentes.
-
-A arquitetura dessa nova regra de negócio exigirá modificações pontuais em quatro camadas:
-
-1. **Banco de Dados (SQL):** Será necessário criar uma tabela ou atualizar a tabela de relacionamento existente entre tarefas e usuários para registrar o status individual (`concluido`: booleano) e o momento exato da ação (`data_hora_conclusao`: timestamp).
-2. **Back-end (Python):** Uma nova função para processar o clique no checkbox. A lógica interna deverá verificar se a contagem de `membros_concluidos` é igual ao `total_membros_atribuidos`. Somente quando essa condição for verdadeira, o status da tarefa principal receberá o *update* para "Finalizada".
-3. **Front-end (HTML/JS):** Inserção do checkbox na interface, visível apenas para os membros da tarefa, com um *event listener* que envia a requisição de atualização para o servidor.
-4. **Relatório do Gestor:** A query que alimenta o relatório precisará de um `JOIN` com os novos dados de conclusão individual para exibir as datas, os horários exatos de quem já marcou, e calcular o progresso (ex: "2 de 5 membros finalizaram").
-
-Para escrevermos o código exato sem alterar absolutamente nada além do solicitado, por favor, envie os seguintes trechos do seu sistema:
-
-* A estrutura das tabelas do banco de dados envolvidas (Tarefas, Usuários e o relacionamento entre eles).
-* O código do back-end (rota/função) que atualmente lida com as tarefas.
-* A query SQL atual responsável por gerar o relatório geral do gestor.
-* O trecho de código do front-end onde os detalhes da tarefa são renderizados.
