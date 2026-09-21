@@ -10,19 +10,14 @@ function populateFolderSelects() {
     if (folderSelect) {
         folderSelect.innerHTML = '<option value="">Selecione a Pasta...</option>';
         lmsFolders.forEach(folder => {
-            
-            // TRAVA DE SEGURANÇA PARA O NÍVEL 2 (AUTONOMIA)
             if (currentUser.accessLevel === 2) {
                 const allowedFolders = currentUser.customPermissions?.allowed_folders || {};
-                // Se a pasta atual não estiver na lista de permitidas dele, ele pula e não mostra no formulário
                 if (!allowedFolders.hasOwnProperty(folder.name)) {
                     return; 
                 }
             }
-
             folderSelect.innerHTML += `<option value="${folder.name}">${folder.name}</option>`;
         });
-
         folderSelect.removeEventListener('change', handleFolderChange);
         folderSelect.addEventListener('change', handleFolderChange);
     }
@@ -79,17 +74,13 @@ function handleFolderChange(e) {
     
     if (found && found.subfolders) {
         found.subfolders.forEach(sub => {
-            
-            // TRAVA DE SEGURANÇA (SUBPASTA) PARA O NÍVEL 2
             if (currentUser.accessLevel === 2) {
                 const allowedFolders = currentUser.customPermissions?.allowed_folders || {};
                 const allowedSubs = allowedFolders[selectedFolderName] || [];
-                // Se não estiver na lista de permitidas dele, pula e não exibe
                 if (!allowedSubs.includes(sub)) {
                     return; 
                 }
             }
-
             subfolderSelect.innerHTML += `<option value="${sub}">${sub}</option>`;
         });
     }
@@ -129,28 +120,13 @@ function changeTaskStatus(taskId, newStatus) {
         try {
             let updateData = { status: newStatus };
 
-            if (newStatus === 'Concluído') {
-                updateData.completed_at = new Date().toISOString();
-                updateData.completed_by = currentUser.name;
-            } else {
-                updateData.completed_at = null;
-                updateData.completed_by = null;
-            }
-
             const { error } = await supabaseClient.from('lms_tasks').update(updateData).eq('id', taskId);
             if (error) throw error;
 
             const taskIndex = tasks.findIndex(t => t.id === taskId);
             if (taskIndex !== -1) {
                 tasks[taskIndex].status = newStatus;
-                if (newStatus === 'Concluído') {
-                    tasks[taskIndex].completed_at = updateData.completed_at;
-                    tasks[taskIndex].completed_by = updateData.completed_by;
-                } else {
-                    tasks[taskIndex].completed_at = null;
-                    tasks[taskIndex].completed_by = null;
-                }
-
+                
                 if (typeof renderSystemData === 'function') {
                     renderSystemData();
                 } else {
@@ -165,6 +141,63 @@ function changeTaskStatus(taskId, newStatus) {
         }
         hideLoader();
     }, 100); 
+}
+
+// NOVA FUNÇÃO: Marca a conclusão individual e, se todos concluíram, fecha a tarefa automaticamente.
+window.markIndividualCompletion = function(taskId) {
+    showLoader();
+    setTimeout(async () => {
+        try {
+            const taskIndex = tasks.findIndex(t => t.id === taskId);
+            if (taskIndex === -1) return;
+
+            let task = tasks[taskIndex];
+            let completions = task.individual_completions || {};
+            
+            // Marca a data de conclusão da pessoa logada
+            completions[currentUser.id] = new Date().toISOString();
+
+            let updateData = { individual_completions: completions };
+
+            // O pulo do gato: verifica se todos os membros escalados já concluíram
+            let allCompleted = task.assignees.every(userId => completions[userId] != null);
+
+            if (allCompleted) {
+                updateData.status = 'Concluído';
+                updateData.completed_at = new Date().toISOString();
+                updateData.completed_by = "Finalizada em equipe (Último: " + currentUser.name + ")";
+            }
+
+            const { error } = await supabaseClient.from('lms_tasks').update(updateData).eq('id', taskId);
+            if (error) throw error;
+
+            // Atualiza os dados localmente
+            task.individual_completions = completions;
+            if (allCompleted) {
+                task.status = 'Concluído';
+                task.completed_at = updateData.completed_at;
+                task.completed_by = updateData.completed_by;
+            }
+
+            if (typeof renderSystemData === 'function') {
+                renderSystemData();
+            } else {
+                renderTasks();
+                renderHistoryTasks();
+            }
+
+            if (allCompleted) {
+                showToast('Você finalizou por último! Tarefa totalmente concluída.', 'success');
+            } else {
+                showToast('Sua parte foi marcada como concluída!', 'success');
+            }
+
+        } catch (err) {
+            console.error(err);
+            showToast('Erro ao registrar conclusão no banco.', 'error');
+        }
+        hideLoader();
+    }, 100);
 }
 
 function saveObservation(taskId) {
@@ -350,7 +383,6 @@ function matchesFilters(task, searchId, assigneeId, statusId, priorityId) {
     return assignedUserMatch && statusMatch && priorityMatch && matchesText;
 }
 
-// CORREÇÃO: Uso de folderIndex e subIndex para garantir IDs HTML únicos
 function renderTasks() {
     const container = document.getElementById('folders-container');
     if (!container) return;
@@ -510,6 +542,7 @@ function renderHistoryTasks() {
     });
 }
 
+// LÓGICA ATUALIZADA: Constrói a lista visual de progresso dos envolvidos
 function buildTaskCardHtml(task) {
     const assignedNames = task.assignees.map(id => {
         const u = lmsTeam.find(user => user.id === id);
@@ -531,13 +564,47 @@ function buildTaskCardHtml(task) {
     if (task.status === 'Em Andamento') statusColor = '#D97828'; 
     if (task.status === 'Concluído') statusColor = '#99BD2E'; 
 
+    // CALCULADORA DE PROGRESSO INDIVIDUAL DA TAREFA
+    let completions = task.individual_completions || {};
+    let totalAssignees = task.assignees.length;
+    let completedCount = 0;
+    
+    let progressListHtml = '';
+    task.assignees.forEach(userId => {
+        const u = lmsTeam.find(user => user.id === userId);
+        const userName = u ? u.name : 'Desconhecido';
+        if (completions[userId]) {
+            completedCount++;
+            const dateCompleted = new Date(completions[userId]).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute:'2-digit' });
+            progressListHtml += `<li style="color: var(--cor-verde-lima); margin-bottom: 4px; display: flex; justify-content: space-between;"><span>✅ ${userName}</span> <span style="font-size: 0.75rem;">${dateCompleted}</span></li>`;
+        } else {
+            progressListHtml += `<li style="color: var(--cor-laranja); margin-bottom: 4px; display: flex; justify-content: space-between;"><span>⏳ ${userName}</span> <span style="font-size: 0.75rem;">Pendente</span></li>`;
+        }
+    });
+
+    let progressHtml = '';
+    if (task.status === 'Em Andamento' || task.status === 'Concluído') {
+        progressHtml = `
+        <div style="margin-top: 15px; padding: 10px; background: var(--fundo-pagina); border-radius: 4px; border: 1px solid var(--borda);">
+            <strong style="font-size: 0.85rem; color: var(--cor-azul-forte); display: block; margin-bottom: 8px; text-transform: uppercase;">Progresso: ${completedCount}/${totalAssignees} concluíram</strong>
+            <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.85rem;">
+                ${progressListHtml}
+            </ul>
+        </div>`;
+    }
+
+    // BOTÕES DE AÇÃO BASEADOS NO PROGRESSO
     let actionButtons = '';
     if (task.status === 'A Fazer') {
         actionButtons = `<button type="button" onclick="changeTaskStatus(${task.id}, 'Em Andamento')" class="btn-sm" style="margin-top: 15px; background-color: #D97828; color: white; width: 100%;">🚀 Iniciar Tarefa</button>`;
     } else if (task.status === 'Em Andamento') {
-        actionButtons = `<button type="button" onclick="changeTaskStatus(${task.id}, 'Concluído')" class="btn-sm" style="margin-top: 15px; background-color: #99BD2E; color: white; width: 100%;">✅ Marcar como Concluído</button>`;
+        actionButtons = progressHtml;
+        // Se a pessoa logada está na tarefa e ainda não ticou a própria caixa
+        if (task.assignees.includes(currentUser.id) && !completions[currentUser.id]) {
+            actionButtons += `<button type="button" onclick="markIndividualCompletion(${task.id})" class="btn-sm" style="margin-top: 10px; background-color: #99BD2E; color: white; width: 100%;">✅ Finalizar Minha Parte</button>`;
+        }
     } else if (task.status === 'Concluído') {
-        actionButtons = `<span style="display: block; margin-top: 15px; color: #99BD2E; font-weight: bold; text-align: center;">✓ Tarefa Finalizada</span>`;
+        actionButtons = progressHtml + `<span style="display: block; margin-top: 15px; color: #99BD2E; font-weight: bold; text-align: center;">✓ Tarefa Finalizada (Equipe)</span>`;
     }
 
     let adminButtons = '';
@@ -710,7 +777,8 @@ function setupTaskForm() {
                         status: 'A Fazer',
                         folder: folderVal,
                         subfolder: subfolderVal,
-                        observations: [] 
+                        observations: [],
+                        individual_completions: {} // Adicionado proativamente
                     };
                     
                     const { data, error } = await supabaseClient.from('lms_tasks').insert([newTaskDb]).select().single();
@@ -781,3 +849,18 @@ function setupTaskForm() {
         }, 100);
     });
 }
+```Para garantir uma inserção cirúrgica e não impactar o sistema que já está em produção, preciso visualizar a estrutura atual do seu projeto. Sem o código-fonte original, qualquer alteração seria baseada em suposições e correria o risco de quebrar as funcionalidades existentes.
+
+A arquitetura dessa nova regra de negócio exigirá modificações pontuais em quatro camadas:
+
+1. **Banco de Dados (SQL):** Será necessário criar uma tabela ou atualizar a tabela de relacionamento existente entre tarefas e usuários para registrar o status individual (`concluido`: booleano) e o momento exato da ação (`data_hora_conclusao`: timestamp).
+2. **Back-end (Python):** Uma nova função para processar o clique no checkbox. A lógica interna deverá verificar se a contagem de `membros_concluidos` é igual ao `total_membros_atribuidos`. Somente quando essa condição for verdadeira, o status da tarefa principal receberá o *update* para "Finalizada".
+3. **Front-end (HTML/JS):** Inserção do checkbox na interface, visível apenas para os membros da tarefa, com um *event listener* que envia a requisição de atualização para o servidor.
+4. **Relatório do Gestor:** A query que alimenta o relatório precisará de um `JOIN` com os novos dados de conclusão individual para exibir as datas, os horários exatos de quem já marcou, e calcular o progresso (ex: "2 de 5 membros finalizaram").
+
+Para escrevermos o código exato sem alterar absolutamente nada além do solicitado, por favor, envie os seguintes trechos do seu sistema:
+
+* A estrutura das tabelas do banco de dados envolvidas (Tarefas, Usuários e o relacionamento entre eles).
+* O código do back-end (rota/função) que atualmente lida com as tarefas.
+* A query SQL atual responsável por gerar o relatório geral do gestor.
+* O trecho de código do front-end onde os detalhes da tarefa são renderizados.
