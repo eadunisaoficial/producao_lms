@@ -173,6 +173,22 @@ function exportToExcel() {
             return u ? u.name : 'Desconhecido';
         }).join(', ');
 
+        // NOVA LÓGICA DE PROGRESSO INDIVIDUAL DETALHADO NO EXCEL
+        let detalheConclusao = "";
+        let completions = task.individual_completions || {};
+        task.assignees.forEach(userId => {
+            const u = lmsTeam.find(user => user.id === userId);
+            const userName = u ? u.name : 'Desconhecido';
+            if (completions[userId]) {
+                const dt = new Date(completions[userId]).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute:'2-digit' });
+                detalheConclusao += `${userName}: Concluiu em ${dt} | `;
+            } else {
+                detalheConclusao += `${userName}: Pendente | `;
+            }
+        });
+        detalheConclusao = detalheConclusao.replace(/ \| $/, ''); // Limpa a última barra
+        if (detalheConclusao === "") detalheConclusao = "Ninguém atribuído";
+
         return {
             "ID Tarefa": task.id,
             "Título": task.title,
@@ -181,10 +197,11 @@ function exportToExcel() {
             "Status Atual": task.status,
             "Prioridade": task.priority,
             "Atribuída para": assignedNames,
+            "Progresso Detalhado (Membros)": detalheConclusao,
             "Prazo Estipulado": prazoFormatado,
             "Data de Conclusão": dataConclusao,
             "Hora de Conclusão": horaConclusao,
-            "Responsável pela Conclusão": responsavel,
+            "Responsável Final": responsavel,
             "Situação do Prazo": statusPrazo,
             "Conversa do Chat": chatCompleto,
             "Descrição da Tarefa": task.description
@@ -195,9 +212,10 @@ function exportToExcel() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Relatório_Tarefas_LMS");
 
+    // Adicionado o tamanho da nova coluna "Progresso Detalhado" {wch: 60}
     const wscols = [
         {wch: 10}, {wch: 40}, {wch: 20}, {wch: 20}, {wch: 15}, {wch: 15},
-        {wch: 35}, {wch: 20}, {wch: 20}, {wch: 20}, {wch: 30}, {wch: 25},
+        {wch: 35}, {wch: 60}, {wch: 20}, {wch: 20}, {wch: 20}, {wch: 35}, {wch: 25},
         {wch: 100}, {wch: 60} 
     ];
     worksheet['!cols'] = wscols;
@@ -476,14 +494,12 @@ function setupAddUserForm() {
     });
 }
 
-// LOGICA DE PERMISSÕES AUTONOMAS NÍVEL 2
 function renderPermUserSelect() {
     const select = document.getElementById('perm-user-select');
     if (!select) return;
     
     select.innerHTML = '<option value="">Selecione um Colaborador de Nível 2...</option>';
     
-    // Mostra apenas Nível 2 na lista de autonomia
     lmsTeam.filter(u => u.accessLevel === 2).forEach(user => {
         select.innerHTML += `<option value="${user.id}">${user.name} (${user.role})</option>`;
     });
@@ -554,12 +570,10 @@ window.savePermissions = async function() {
     const canCreate = document.getElementById('perm-can-create').checked;
     const allowedFolders = {};
 
-    // Mapeia todas as caixas de pastas que foram marcadas
     document.querySelectorAll('.perm-folder:checked').forEach(fCb => {
         const folderName = fCb.value;
         allowedFolders[folderName] = [];
         
-        // Pega as subpastas marcadas que pertencem a essa pasta mãe
         document.querySelectorAll(`.perm-subfolder[data-parent="${folderName}"]:checked`).forEach(sCb => {
             allowedFolders[folderName].push(sCb.value);
         });
@@ -617,7 +631,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupTaskForm();
     renderSystemData();
     
-    // A GRANDE MÁGICA: Se for nível 2, mas tiver autonomia, exibe o painel de criar tarefas
     if (currentUser.accessLevel === 2 && currentUser.customPermissions && currentUser.customPermissions.can_create_tasks) {
         const adminPanel = document.getElementById('admin-panel');
         if (adminPanel) adminPanel.classList.remove('hidden');
